@@ -151,7 +151,15 @@ public class CompleteTransactionTask extends TransactionTask
                 hostLog.error("Unable to log MP transaction to DR because of missing InitiateTaskMessage, " +
                               "fragment: " + fragment.toString());
             }
+            StoredProcedureInvocation inv0 = initiateTask.getStoredProcedureInvocation();
             StoredProcedureInvocation invocation = initiateTask.getStoredProcedureInvocation().getShallowCopy();
+            String s0 = inv0.toString();
+            String s1 = invocation.toString();
+            if (!s0.equals(s1)) {
+                System.out.println("-------- Stored Procedure Invocation Shallow Copy mismatch ------- ");
+                System.out.println(s0);
+                System.out.println(s1);
+            }
             m_drGateway.onSuccessfulMPCall(m_txnState.m_spHandle,
                     m_txnState.txnId,
                     m_txnState.uniqueId,
