@@ -97,30 +97,79 @@ def find_arg_index(args, arg):
 
 def fork_voltdb(host, voltdbroot):
     # before we fork over, see if /voltdbroot (persistent storage mount) is empty
-    # if it is, copy our pristine voltdbroot from the image
+    # if it is, initialize a new database there from our assets
     if not os.path.exists(PV_VOLTDBROOT):
         print "ERROR: '%s' is not mounted!!!!" % PV_VOLTDBROOT
         sys.exit(-1)
+    assets_dir = os.path.join(os.getenv('VOLTDB_INIT_VOLUME', '/etc/voltdb'))
     working_voltdbroot = os.path.join(PV_VOLTDBROOT, voltdbroot)
-    print os.listdir(PV_VOLTDBROOT)
-    print working_voltdbroot
-    if voltdbroot not in os.listdir(PV_VOLTDBROOT):
-        # our docker image has pwd pointing to the pristine voltdbroot
-        # TODO: this is ok for now (maybe) but when catalogs change we need to persist back to our image?
-        pristine_root = os.getcwd()
-        print "Copying pristine voltdbroot to '%s'" % working_voltdbroot
-        copytree(pristine_root, working_voltdbroot, symlinks=True, ignore=None)
+    try:
+        pv = os.listdir(working_voltdbroot)
+    except OSError:
+        pv = []
+    print pv
+    if len(pv) == 0:
+        print "Initializing a new voltdb database at '%s'" % working_voltdbroot
+        try:
+            os.mkdir(working_voltdbroot)
+        except OSError:
+            pass
+        os.chdir(working_voltdbroot)
+        cmd = ['voltdb',  'init']
+        """
+        These asset files are mounted from a configmap
+        !!!Updating the configmap will have NO EFFECT on a running or restarted instance!!!
+        The command to create the configmap is typically:
+        
+        kubectl create configmap --from-file=deployment=mydeployment.xml [--from-file=classes=myclasses.jar] [--from-file=schema=myschema.sql]
+        
+        The deployment file node count is ignored, node count is specified in the runtime environment variable $NODECOUNT
+        """
+        if os.path.isdir(assets_dir):
+            deployment_file = os.path.join(assets_dir, 'deployment')
+            if os.path.isfile(deployment_file):
+                cmd.extend(['--config', deployment_file])
+            classes_file = os.path.join(assets_dir, 'classes')
+            if os.path.isfile(classes_file):
+                cmd.extend(['--classes', classes_file])
+            schema_file = os.path.join(assets_dir, 'schema')
+            if os.path.isfile(schema_file):
+                cmd.extend(['--schema', schema_file])
+        extra_init_args = os.getenv('VOLTDB_INIT_ARGS')
+        if extra_init_args:
+            cmd.extend(extra_init_args.split(' '))
+        print "Init command: " + str(cmd)
+        from subprocess import Popen
+        sp = Popen(cmd, shell=False)
+        sp.wait()
+        if sp.returncode != 0:
+            print "ERROR failed Initializing voltdb database at '%s' (did you forget --force?)" % working_voltdbroot
+            sys.exit(-1)
+        print "Initialize new voltdb succeeded on node '%s'" % host
         os.chdir(PV_VOLTDBROOT)
         os.system("rm -f " + ssname)
         os.system("ln -sf " + voltdbroot + " " + ssname)
+
     os.chdir(working_voltdbroot)
     args = sys.argv[:]  # copy
-    for i in range(0, len(args)):
-        if args[i] == "-D" or args[i] == '--directory':
-            args[i+1] = working_voltdbroot
-    # run voltdb replacing current process
-    hni = find_arg_index(args, '-H')
-    if hni == 0:
+    import shlex
+    args = shlex.split(' '.join(args))
+    if os.path.isdir(assets_dir):
+        license_file = os.path.join(assets_dir, 'license')
+        if os.path.isfile(license_file):
+            li = find_arg_index(args, '-L') or find_arg_index(args, '--license')
+            if li is None:
+                li = len(args)
+                args[li] = "-L"
+                li += 1
+            args[li+1] = license_file
+    if os.path.isfile(deployment_file):
+        cmd.extend(['--config', deployment_file])
+    di = find_arg_index(args, '-D') or find_arg_index(args, '--directory')
+    if di:
+        args[di+1] = working_voltdbroot
+    hni = find_arg_index(args, '-H') or find_arg_index(args, '--host')
+    if hni is None:
         hni = len(args)
         args[hni] = "-H"
         hni += 1
@@ -130,6 +179,7 @@ def fork_voltdb(host, voltdbroot):
     sys.stdout.flush()
     sys.stderr.flush()
     d = os.path.dirname(args[0])
+    print "Starting VoltDB..."
     os.execv(os.path.join(d, args[1]), args[1:])
     sys.exit(0)
 
