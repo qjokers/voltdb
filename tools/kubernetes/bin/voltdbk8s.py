@@ -95,6 +95,24 @@ def find_arg_index(args, arg):
     return None
 
 
+def replace_or_add_option(args, option, value, action=None):
+    # option is comma separated list of option formats to be treated equally, ie. "-L,--license"
+    # we'll assume that only one of the option formats is present
+    options = option.split(",")
+    for o in options:
+        ix = find_arg_index(args, o)
+        if ix is not None:
+            break
+    if ix is None:
+        if action == 'replace':
+            return
+        args.append(o)
+        args.append(value)
+        return
+    args[ix] = value
+    return
+
+
 def fork_voltdb(host, voltdbroot):
     # before we fork over, see if /voltdbroot (persistent storage mount) is empty
     # if it is, initialize a new database there from our assets
@@ -157,23 +175,9 @@ def fork_voltdb(host, voltdbroot):
     if os.path.isdir(assets_dir):
         license_file = os.path.join(assets_dir, 'license')
         if os.path.isfile(license_file):
-            li = find_arg_index(args, '-L') or find_arg_index(args, '--license')
-            if li is None:
-                li = len(args)
-                args[li] = "-L"
-                li += 1
-            args[li+1] = license_file
-    if os.path.isfile(deployment_file):
-        cmd.extend(['--config', deployment_file])
-    di = find_arg_index(args, '-D') or find_arg_index(args, '--directory')
-    if di:
-        args[di+1] = working_voltdbroot
-    hni = find_arg_index(args, '-H') or find_arg_index(args, '--host')
-    if hni is None:
-        hni = len(args)
-        args[hni] = "-H"
-        hni += 1
-    args[hni] = host
+            replace_or_add_option(args, "-l,--license", license_file)
+    replace_or_add_option(args, "-D,--dir", working_voltdbroot, action="replace")
+    replace_or_add_option(args, "-H,--host", host)
     print "VoltDB cmd is '%s'" % args[1:]
     # flush so we see our output in k8s logs
     sys.stdout.flush()
