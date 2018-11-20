@@ -482,6 +482,7 @@ public class SocketJoiner {
     private void processSSC(ServerSocketChannel ssc) throws Exception {
         SocketChannel sc = null;
         while ((sc = ssc.accept()) != null) {
+            boolean success = false;
             try {
                 sc.socket().setTcpNoDelay(true);
                 sc.socket().setPerformancePreferences(0, 2, 1);
@@ -562,16 +563,18 @@ public class SocketJoiner {
                 } else {
                     throw new RuntimeException("Unexpected message type " + type + " from " + remoteAddress);
                 }
-            } catch (Exception ex) {
+                success = true;
+            } catch (IOException e) {
+                LOG.info("IOException occurred while processing new socket " + sc, e);
+            } finally {
                 // do not leak sockets when exception happens
-                try {
-                    sc.close();
-                } catch (IOException ioex) {
-                    // ignore the close exception on purpose
+                if (!success) {
+                    try {
+                        sc.close();
+                    } catch (IOException ioex) {
+                        // ignore the close exception on purpose
+                    }
                 }
-
-                // re-throw the exception, it will be handled by the caller
-                throw ex;
             }
 
         }
